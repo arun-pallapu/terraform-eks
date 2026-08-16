@@ -7,12 +7,15 @@ This project demonstrates how to use **Terraform variables** and **`.tfvars` fil
 ## Project Structure
 
 ```text
-terraform/
+terraform-eks/
+├── .github/
+│   └── workflows/
+│       └── terraform.yml
 ├── main.tf
 ├── variables.tf
 ├── outputs.tf
 ├── dev.tfvars
-└── prod.tfvars
+└── README.md
 ```
 
 ---
