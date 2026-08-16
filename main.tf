@@ -10,7 +10,7 @@ terraform {
 }
 
 provider "aws" {
-  region = "us-west-2"
+  region = var.region
 }
 
 # -------------------------
@@ -21,13 +21,10 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 6.0"
 
-  name = "myapp-dev-vpc"
-  cidr = "10.0.0.0/16"
+  name = "${var.project_name}-${var.environment}-vpc"
+  cidr = var.vpc_cidr
 
-  azs = [
-    "us-west-2a",
-    "us-west-2b"
-  ]
+  azs = var.availability_zones
 
   public_subnets = [
     "10.0.1.0/24",
@@ -42,9 +39,9 @@ module "vpc" {
   enable_nat_gateway = false
 
   tags = {
-    Name        = "myapp-dev-vpc"
-    Project     = "myapp"
-    Environment = "dev"
+    Name        = "${var.project_name}-${var.environment}-vpc"
+    Project     = var.project_name
+    Environment = var.environment
     ManagedBy   = "terraform"
   }
 }
@@ -57,8 +54,8 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  name               = "myapp-dev-eks"
-  kubernetes_version = "1.33"
+  name               = "${var.project_name}-${var.environment}-eks"
+  kubernetes_version = var.eks_cluster_version
 
   endpoint_public_access = true
 
@@ -67,20 +64,20 @@ module "eks" {
 
   eks_managed_node_groups = {
     application = {
-      name = "myapp-dev-ng"
+      name = "${var.project_name}-${var.environment}-ng"
 
-      instance_types = ["t3.small"]
+      instance_types = var.eks_node_instance_types
 
-      min_size     = 1
-      max_size     = 1
-      desired_size = 1
+      min_size     = var.eks_node_min_size
+      max_size     = var.eks_node_max_size
+      desired_size = var.eks_node_desired_size
     }
   }
 
   tags = {
-    Name        = "myapp-dev-eks"
-    Project     = "myapp"
-    Environment = "dev"
+    Name        = "${var.project_name}-${var.environment}-eks"
+    Project     = var.project_name
+    Environment = var.environment
     ManagedBy   = "terraform"
   }
 }
