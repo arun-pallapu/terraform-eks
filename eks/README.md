@@ -1,287 +1,783 @@
-# Terraform Resources
+# Terraform EKS Deployment with GitHub Actions OIDC
 
-This project demonstrates how to use **Terraform variables** and **`.tfvars` files** to manage environment-specific configuration.
+This project provisions an Amazon EKS cluster using Terraform.
+
+The project uses:
+
+* Terraform
+* AWS
+* Amazon EKS
+* Amazon VPC
+* S3 remote Terraform state
+* GitHub Actions
+* GitHub OIDC authentication
+* IAM role for GitHub Actions
+* EKS managed node groups
 
 ---
 
-## Project Structure
+## Architecture
+
+```text
+                         GitHub Repository
+                    arun-pallapu/terraform-eks
+                              |
+                              |
+                       GitHub Actions
+                              |
+                    GitHub OIDC Authentication
+                              |
+                              v
+                 AWS IAM Role
+          terraform-eks-github-actions
+                              |
+                              |
+                    Terraform
+                              |
+             +----------------+----------------+
+             |                                 |
+             v                                 v
+      S3 Remote State                    AWS Infrastructure
+             |                                 |
+             |                         +-------+-------+
+             |                         |               |
+             v                         v               v
+   terraform.tfstate                 VPC             EKS
+                                      |               |
+                              +-------+-------+       |
+                              |               |       |
+                           Public          Private    |
+                           Subnets         Subnets    |
+                                                      |
+                                               Managed Node Group
+                                                      |
+                                                   t3.small
+```
+
+---
+
+# Project Structure
 
 ```text
 terraform-eks/
+│
 ├── .github/
 │   └── workflows/
 │       └── terraform.yml
+│
+├── backend.tf
+├── provider.tf
 ├── main.tf
 ├── variables.tf
 ├── outputs.tf
 ├── dev.tfvars
-└── README.md
+├── README.md
+└── .gitignore
+```
+
+The GitHub OIDC bootstrap is maintained separately:
+
+```text
+terraform-eks-oidc-bootstrap/
+├── main.tf
+└── variables.tf
 ```
 
 ---
 
-## 1. `variables.tf`
+# 1. Prerequisites
 
-`variables.tf` defines the inputs that Terraform accepts.
+Install the following:
 
-**Example:**
+* AWS CLI
+* Terraform
+* kubectl
+* Git
+* An AWS account
+* A GitHub repository
 
-```hcl
-variable "region" {
-  description = "The AWS region to deploy resources to."
-  type        = string
-  default     = "us-west-2"
-}
-```
-
-This tells Terraform:
-
-> Terraform has a variable called `region`, and its default value is `us-west-2`.
-
-**Common Variable Structure:**
-
-```hcl
-variable "variable_name" {
-  description = "Description of the variable."
-  type        = string
-  default     = "default-value"
-}
-```
-
----
-
-## 2. Why Use `.tfvars` Files?
-
-A `.tfvars` file is used to provide or override values for Terraform variables.
-
-This becomes particularly useful when you want to use the same Terraform code for multiple environments.
-
-```
-         Same Terraform Code
-                 |
-      +----------+----------+
-      |                     |
-  dev.tfvars            prod.tfvars
-      |                     |
-      v                     v
-DEV Environment       PROD Environment
-```
-
-You don't need to create separate `main.tf` files for each environment.
-
----
-
-## 3. `dev.tfvars`
-
-Example development environment configuration:
-
-```hcl
-project_name = "myapp"
-environment  = "dev"
-
-region = "us-east-1"
-
-availability_zones = [
-  "us-east-1a",
-  "us-east-1b"
-]
-
-eks_cluster_version = "1.33"
-
-eks_node_instance_types = ["t3.small"]
-
-eks_node_min_size     = 1
-eks_node_max_size     = 1
-eks_node_desired_size = 1
-```
-
-This configuration tells Terraform to deploy the development environment with:
-
-| Setting            | Value                    |
-|--------------------|--------------------------|
-| Region             | `us-east-1`              |
-| Environment        | `dev`                    |
-| Availability Zones | `us-east-1a`, `us-east-1b` |
-| EKS Version        | `1.33`                   |
-| Node Type          | `t3.small`               |
-| Minimum Nodes      | `1`                      |
-| Maximum Nodes      | `1`                      |
-| Desired Nodes      | `1`                      |
-
----
-
-## 4. `prod.tfvars`
-
-You can use different values for production while keeping the same Terraform code.
-
-**Example:**
-
-```hcl
-project_name = "myapp"
-environment  = "prod"
-
-region = "us-west-2"
-
-availability_zones = [
-  "us-west-2a",
-  "us-west-2b"
-]
-
-eks_cluster_version = "1.33"
-
-eks_node_instance_types = ["m5.large"]
-
-eks_node_min_size     = 2
-eks_node_max_size     = 5
-eks_node_desired_size = 3
-```
-
-The same `main.tf` can now be used for both environments.
-
----
-
-## 5. Running the Development Environment
-
-To create a plan using `dev.tfvars`:
+Verify:
 
 ```bash
-terraform plan -var-file="dev.tfvars"
-```
-
-To create the infrastructure:
-
-```bash
-terraform apply -var-file="dev.tfvars"
-```
-
-Terraform will use the values from `dev.tfvars` instead of the defaults defined in `variables.tf`.
-
----
-
-## 6. Running the Production Environment
-
-To create a production plan:
-
-```bash
-terraform plan -var-file="prod.tfvars"
-```
-
-To create the production infrastructure:
-
-```bash
-terraform apply -var-file="prod.tfvars"
+aws --version
+terraform version
+kubectl version --client
+git --version
 ```
 
 ---
 
-## 7. Variable Precedence
+# 2. AWS Authentication
 
-Terraform can get variable values from several places. For this setup, the important concept is:
+For the initial bootstrap, AWS credentials are required on the machine where Terraform is executed.
 
-```
-variables.tf
-     |
-     | defines variable + default
-     v
-dev.tfvars
-     |
-     | overrides default
-     v
-Terraform
-```
-
-For example, `variables.tf` contains:
-
-```hcl
-variable "region" {
-  default = "us-west-2"
-}
-```
-
-But `dev.tfvars` contains:
-
-```hcl
-region = "us-east-1"
-```
-
-When you run:
+Verify AWS access:
 
 ```bash
-terraform plan -var-file="dev.tfvars"
+aws sts get-caller-identity
 ```
 
-Terraform uses `us-east-1` instead of the default `us-west-2`.
+Example:
+
+```text
+Account: 123456789012
+Arn: arn:aws:iam::123456789012:role/...
+```
 
 ---
 
-## 8. Why `.tfvars` Is Useful
+# 3. GitHub OIDC Bootstrap
 
-Using `.tfvars` files allows you to maintain:
+The GitHub OIDC resources are created separately from the main EKS Terraform project.
 
-- One reusable `main.tf`
-- One `variables.tf`
-- One `outputs.tf`
-- Separate configuration for each environment
+Directory:
 
-```
-Terraform Code
-     |
-     +-- dev.tfvars   →   DEV
-     |
-     +-- stage.tfvars →   STAGE
-     |
-     +-- prod.tfvars  →   PROD
+```text
+terraform-eks-oidc-bootstrap/
+├── main.tf
+└── variables.tf
 ```
 
-This is a common approach for managing environment-specific Terraform configuration.
+The bootstrap creates:
 
----
+```text
+AWS
+│
+├── GitHub OIDC Provider
+│
+└── IAM Role
+    └── terraform-eks-github-actions
+```
 
-## 9. Important Note
-
-You don't have to use `terraform.tfvars` specifically. You can use:
-
-- `dev.tfvars`
-- `prod.tfvars`
-- `stage.tfvars`
-
-and explicitly select the required file:
+Go to the bootstrap directory:
 
 ```bash
-terraform plan -var-file="dev.tfvars"
+cd terraform-eks-oidc-bootstrap
 ```
 
-> A file named `terraform.tfvars` is **automatically loaded** by Terraform.  
-> Custom files such as `dev.tfvars` or `prod.tfvars` require the `-var-file` option.
-
----
-
-## 10. Typical Terraform Workflow
-
-For the development environment:
+Initialize:
 
 ```bash
-# Initialize the working directory
 terraform init
+```
 
-# Format configuration files
+Format:
+
+```bash
 terraform fmt
+```
 
-# Validate the configuration
+Validate:
+
+```bash
 terraform validate
+```
 
-# Preview the changes
+Review:
+
+```bash
+terraform plan
+```
+
+Apply:
+
+```bash
+terraform apply
+```
+
+Get the IAM role ARN:
+
+```bash
+terraform output github_actions_role_arn
+```
+
+Example:
+
+```text
+arn:aws:iam::123456789012:role/terraform-eks-github-actions
+```
+
+---
+
+# 4. GitHub Repository Variable
+
+The GitHub Actions workflow uses the IAM role created by the bootstrap.
+
+In the GitHub repository:
+
+```text
+Settings
+  → Secrets and variables
+  → Actions
+  → Variables
+  → New repository variable
+```
+
+Create:
+
+```text
+Name:
+AWS_ROLE_ARN
+```
+
+Value:
+
+```text
+arn:aws:iam::<AWS_ACCOUNT_ID>:role/terraform-eks-github-actions
+```
+
+Do not store AWS access keys or AWS secret keys in GitHub.
+
+GitHub Actions authenticates to AWS using OIDC.
+
+---
+
+# 5. S3 Remote State
+
+Terraform state is stored in Amazon S3.
+
+Current bucket:
+
+```text
+terraform-eks-state-arun-2026-0905
+```
+
+Backend configuration:
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket       = "terraform-eks-state-arun-2026-0905"
+    key          = "eks/dev/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+```
+
+The S3 bucket should have:
+
+* Versioning enabled
+* Server-side encryption enabled
+* Appropriate IAM permissions
+
+Initialize the backend:
+
+```bash
+cd terraform-eks
+terraform init
+```
+
+---
+
+# 6. Terraform Configuration
+
+## Provider
+
+`provider.tf` defines:
+
+* Terraform version
+* AWS provider
+* AWS region
+
+Current AWS region:
+
+```text
+us-east-1
+```
+
+---
+
+## VPC
+
+The project creates a VPC with CIDR:
+
+```text
+10.0.0.0/16
+```
+
+Three Availability Zones are used.
+
+### Public Subnets
+
+```text
+10.0.101.0/24
+10.0.102.0/24
+10.0.103.0/24
+```
+
+### Private Subnets
+
+```text
+10.0.1.0/24
+10.0.2.0/24
+10.0.3.0/24
+```
+
+A single NAT Gateway is configured for the practice environment.
+
+---
+
+# 7. EKS Cluster
+
+The EKS cluster is created using the Terraform AWS EKS module.
+
+Cluster name:
+
+```text
+dev-eks
+```
+
+Kubernetes version:
+
+```text
+1.33
+```
+
+The EKS API endpoint is publicly accessible.
+
+The Terraform-created principal is granted EKS administrator access using:
+
+```hcl
+enable_cluster_creator_admin_permissions = true
+```
+
+---
+
+# 8. EKS Managed Node Group
+
+The project creates one managed node group:
+
+```text
+dev-eks-nodes
+```
+
+Instance type:
+
+```text
+t3.small
+```
+
+Configuration:
+
+```text
+Minimum nodes:  1
+Desired nodes:  1
+Maximum nodes:  2
+```
+
+Capacity type:
+
+```text
+ON_DEMAND
+```
+
+---
+
+# 9. EKS Add-ons
+
+The following EKS add-ons are enabled:
+
+```text
+CoreDNS
+kube-proxy
+VPC CNI
+EKS Pod Identity Agent
+```
+
+The configuration uses the most recent compatible versions available from AWS.
+
+---
+
+# 10. Local Terraform Deployment
+
+Clone the repository:
+
+```bash
+git clone https://github.com/arun-pallapu/terraform-eks.git
+```
+
+Enter the project:
+
+```bash
+cd terraform-eks
+```
+
+Initialize Terraform:
+
+```bash
+terraform init
+```
+
+Format the configuration:
+
+```bash
+terraform fmt
+```
+
+Validate:
+
+```bash
+terraform validate
+```
+
+Create a plan:
+
+```bash
 terraform plan -var-file="dev.tfvars"
+```
 
-# Apply the changes
+Review the resources carefully.
+
+Apply:
+
+```bash
 terraform apply -var-file="dev.tfvars"
 ```
 
-When you're finished with the practice EKS environment:
+---
+
+# 11. Verify EKS
+
+After Terraform finishes, configure kubectl:
 
 ```bash
-# Destroy the infrastructure
+aws eks update-kubeconfig \
+  --region us-east-1 \
+  --name dev-eks
+```
+
+Check the cluster:
+
+```bash
+kubectl cluster-info
+```
+
+Check nodes:
+
+```bash
+kubectl get nodes
+```
+
+Expected:
+
+```text
+NAME                          STATUS   ROLES    AGE   VERSION
+ip-10-0-x-x.ec2.internal     Ready    <none>   ...   ...
+```
+
+Check all pods:
+
+```bash
+kubectl get pods -A
+```
+
+Check EKS add-ons:
+
+```bash
+aws eks list-addons \
+  --cluster-name dev-eks \
+  --region us-east-1
+```
+
+---
+
+# 12. GitHub Actions
+
+The workflow is located at:
+
+```text
+.github/workflows/terraform.yml
+```
+
+The workflow performs:
+
+```text
+Checkout
+   ↓
+GitHub OIDC authentication
+   ↓
+Assume AWS IAM Role
+   ↓
+Verify AWS identity
+   ↓
+Install Terraform
+   ↓
+terraform fmt
+   ↓
+terraform init
+   ↓
+terraform validate
+   ↓
+terraform plan
+   ↓
+terraform apply
+```
+
+AWS credentials are obtained dynamically using GitHub OIDC.
+
+No permanent AWS access key is required in GitHub.
+
+---
+
+# 13. Terraform State
+
+Terraform state is stored remotely:
+
+```text
+S3
+└── terraform-eks-state-arun-2026-0905
+    └── eks/
+        └── dev/
+            └── terraform.tfstate
+```
+
+Do not commit Terraform state to Git.
+
+The `.gitignore` file excludes:
+
+```text
+*.tfstate
+*.tfstate.*
+```
+
+---
+
+# 14. Useful Terraform Commands
+
+Initialize:
+
+```bash
+terraform init
+```
+
+Format:
+
+```bash
+terraform fmt
+```
+
+Check formatting:
+
+```bash
+terraform fmt -check -recursive
+```
+
+Validate:
+
+```bash
+terraform validate
+```
+
+Plan:
+
+```bash
+terraform plan -var-file="dev.tfvars"
+```
+
+Apply:
+
+```bash
+terraform apply -var-file="dev.tfvars"
+```
+
+Show outputs:
+
+```bash
+terraform output
+```
+
+Show state:
+
+```bash
+terraform state list
+```
+
+Destroy:
+
+```bash
 terraform destroy -var-file="dev.tfvars"
 ```
 
-This removes all infrastructure created using the development configuration.
+---
+
+# 15. Destroy EKS Infrastructure
+
+When finished with the practice environment:
+
+```bash
+cd terraform-eks
+terraform destroy -var-file="dev.tfvars"
+```
+
+This destroys the infrastructure managed by the main Terraform project, including:
+
+```text
+EKS Cluster
+EKS Node Group
+VPC
+Subnets
+NAT Gateway
+Other Terraform-managed EKS/VPC resources
+```
+
+The separate GitHub OIDC bootstrap resources are not destroyed by this command.
+
+---
+
+# 16. Destroy GitHub OIDC Bootstrap
+
+Only destroy the bootstrap when you no longer need GitHub Actions to authenticate to AWS.
+
+```bash
+cd terraform-eks-oidc-bootstrap
+terraform destroy
+```
+
+This removes the separately managed:
+
+```text
+GitHub OIDC Provider
+IAM Role
+IAM Policy Attachment
+```
+
+---
+
+# 17. Important Security Notes
+
+The bootstrap IAM role currently uses:
+
+```text
+AdministratorAccess
+```
+
+This is acceptable for learning and practice.
+
+For production, replace it with a least-privilege IAM policy that allows only the AWS resources Terraform needs.
+
+The GitHub OIDC trust policy should also be restricted to the intended repository and branch.
+
+Never commit:
+
+```text
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+Terraform state files
+Private keys
+Passwords
+API tokens
+```
+
+---
+
+# 18. Environment Variables
+
+The current practice configuration uses:
+
+```text
+Environment: dev
+Region:      us-east-1
+Cluster:     dev-eks
+Kubernetes:  1.33
+Node type:   t3.small
+Nodes:       1-2
+```
+
+These values can be changed through:
+
+```text
+dev.tfvars
+```
+
+Example:
+
+```hcl
+region = "us-east-1"
+
+environment = "dev"
+
+cluster_name = "eks"
+
+eks_cluster_version = "1.33"
+
+eks_node_instance_types = [
+  "t3.small"
+]
+
+eks_node_min_size     = 1
+eks_node_max_size     = 2
+eks_node_desired_size = 1
+```
+
+---
+
+# 19. Deployment Flow
+
+The complete deployment flow is:
+
+```text
+                    AWS
+                     │
+                     │
+          Bootstrap Terraform
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+          ▼                     ▼
+   GitHub OIDC Provider      IAM Role
+                              │
+                              │
+                              ▼
+                     GitHub Actions
+                              │
+                              │ OIDC
+                              ▼
+                         AWS STS
+                              │
+                              ▼
+                    Assume IAM Role
+                              │
+                              ▼
+                         Terraform
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+                    ▼                   ▼
+               S3 Backend          AWS Resources
+                    │                   │
+                    │              ┌────┴────┐
+                    │              │         │
+                    │              ▼         ▼
+                    │             VPC       EKS
+                    │                        │
+                    │                        ▼
+                    │                 Managed Nodes
+                    │
+                    ▼
+             terraform.tfstate
+```
+
+---
+
+# 20. Project Goal
+
+This project demonstrates a practical DevOps workflow for provisioning AWS infrastructure using:
+
+```text
+Terraform
+   +
+AWS
+   +
+EKS
+   +
+GitHub Actions
+   +
+OIDC
+   +
+S3 Remote State
+```
+
+The main objective is to avoid storing long-lived AWS credentials in GitHub Actions while maintaining remote Terraform state and automated infrastructure deployment.
