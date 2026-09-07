@@ -1,0 +1,105 @@
+name: Terraform EKS
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: true
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------
+      # Configure AWS using GitHub OIDC
+      # ------------------------------------------------------
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ------------------------------------------------------
+      # Verify AWS identity
+      # ------------------------------------------------------
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+      # ------------------------------------------------------
+      # Install Terraform
+      # ------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      # ------------------------------------------------------
+      # Terraform Format
+      # ------------------------------------------------------
+
+      - name: Terraform Format Check
+        run: |
+          terraform fmt -check -recursive
+
+      # ------------------------------------------------------
+      # Terraform Init
+      # ------------------------------------------------------
+
+      - name: Terraform Init
+        run: |
+          terraform init
+
+      # ------------------------------------------------------
+      # Terraform Validate
+      # ------------------------------------------------------
+
+      - name: Terraform Validate
+        run: |
+          terraform validate
+
+      # ------------------------------------------------------
+      # Terraform Plan
+      # ------------------------------------------------------
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file="dev.tfvars" \
+            -out=tfplan
+
+      # ------------------------------------------------------
+      # Terraform Apply
+      # ------------------------------------------------------
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          terraform apply \
+            -auto-approve \
+            tfplan
+
