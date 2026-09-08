@@ -78,10 +78,13 @@ resource "aws_iam_role" "github_actions" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-            # Lock down to exact repo; wildcard on ref so push, PR, and
-            # manual triggers all work. Tighten to a specific branch in
-            # production by replacing * with ref:refs/heads/main.
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"
+          }
+          # StringLike required because GitHub appends numeric IDs to the sub
+          # claim in newer format:
+          # repo:arun-pallapu@266037039/terraform-eks@1335928755:ref:refs/heads/main
+          # The wildcard * covers both old and new formats safely.
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = var.github_sub_claim
           }
         }
       }

@@ -16,6 +16,12 @@ variable "github_branch" {
   default     = "main"
 }
 
+variable "github_sub_claim" {
+  description = "Full sub claim pattern from GitHub OIDC token (supports wildcards)"
+  type        = string
+  default     = "repo:arun-pallapu*terraform-eks*:ref:refs/heads/main"
+}
+
 variable "iam_role_name" {
   description = "IAM role name for GitHub Actions"
   type        = string
