@@ -126,6 +126,21 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
+  # ----------------------------------------------------------
+  # Cluster Security Group - allow nodes to reach API server
+  # ----------------------------------------------------------
+
+  cluster_security_group_additional_rules = {
+    ingress_nodes_443 = {
+      description = "Node groups to cluster API"
+      protocol    = "tcp"
+      from_port   = 443
+      to_port     = 443
+      type        = "ingress"
+      cidr_blocks = ["10.0.0.0/16"]
+    }
+  }
+
   tags = local.tags
 }
 
