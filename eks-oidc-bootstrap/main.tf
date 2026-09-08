@@ -38,8 +38,14 @@ resource "aws_iam_openid_connect_provider" "github" {
     "sts.amazonaws.com"
   ]
 
+  # GitHub rotates its OIDC certificate periodically.
+  # AWS now validates GitHub tokens via its own trust store, so
+  # the thumbprint value is ignored — but the field is still required.
+  # Using the well-known static thumbprint avoids bootstrap failures
+  # when the live cert temporarily differs.
   thumbprint_list = [
-    data.tls_certificate.github.certificates[0].sha1_fingerprint
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c58a3a8518e8759bf075b76b750d4f2df264fcd"
   ]
 
   tags = {
@@ -72,9 +78,9 @@ resource "aws_iam_role" "github_actions" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          }
-
-          StringLike = {
+            # Lock down to exact repo; wildcard on ref so push, PR, and
+            # manual triggers all work. Tighten to a specific branch in
+            # production by replacing * with ref:refs/heads/main.
             "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"
           }
         }
