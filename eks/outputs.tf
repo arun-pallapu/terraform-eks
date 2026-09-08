@@ -1,4 +1,3 @@
-```hcl
 output "eks_cluster_name" {
   description = "EKS cluster name"
   value       = module.eks.cluster_name
@@ -33,4 +32,3 @@ output "public_subnet_ids" {
   description = "Public subnet IDs"
   value       = module.vpc.public_subnets
 }
-```

@@ -1,12 +1,8 @@
-project_name = "myapp"
-environment  = "prod"
+region = "us-east-1"
 
-region = "us-west-2"
+environment = "prod"
 
-availability_zones = [
-  "us-west-2a",
-  "us-west-2b"
-]
+cluster_name = "eks"
 
 eks_cluster_version = "1.33"
 

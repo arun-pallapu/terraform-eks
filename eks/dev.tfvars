@@ -7,7 +7,7 @@ cluster_name = "eks"
 eks_cluster_version = "1.33"
 
 eks_node_instance_types = [
-  "t3.small"
+  "t3.micro"
 ]
 
 eks_node_min_size     = 1
