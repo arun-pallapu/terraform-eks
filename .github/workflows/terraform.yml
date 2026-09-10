@@ -80,3 +80,10 @@ jobs:
           terraform apply \
             -auto-approve \
             tfplan
+
+      - name: Terraform Destroy
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          terraform destroy \
+            -auto-approve \
+            -var-file="dev.tfvars"
